@@ -5,31 +5,43 @@
 $ErrorActionPreference = "Stop"
 $OwnerRepo = "GoblinRules/PyAutoClicker"   # change if you fork/rename
 
-# --- Resolve app URL (prefer the standard location) ---
-$branches   = @("main","master")
-$paths      = @("pyautoclicker.py","src/pyautoclicker.py","app/pyautoclicker.py","PyAutoClicker.py","trusty_clicker.py")
+# --- Resolve app URL (accept 200 OR 206; HEAD then GET fallback) ---
+$OwnerRepo = "GoblinRules/PyAutoClicker"
+$branches  = @("main","master")
+$paths     = @("pyautoclicker.py","src/pyautoclicker.py","app/pyautoclicker.py","PyAutoClicker.py","trusty_clicker.py")
 
-function Test-200($u) {
+function Test-Exists($u) {
   try {
-    # Some networks block HEAD; fetch first byte with Range.
-    (Invoke-WebRequest -UseBasicParsing -Uri $u -Headers @{Range="bytes=0-0"} -MaximumRedirection 5 -TimeoutSec 15).StatusCode -eq 206 -or $LASTEXITCODE -eq 0
-  } catch { $false }
+    $r = Invoke-WebRequest -UseBasicParsing -Method Head -Uri $u -MaximumRedirection 5 -TimeoutSec 15
+    return $r.StatusCode -in 200,206
+  } catch {
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing -Uri $u -Headers @{Range="bytes=0-0"} -MaximumRedirection 5 -TimeoutSec 15
+      return $r.StatusCode -in 200,206
+    } catch { return $false }
+  }
 }
 
 $ScriptUrl = $null
-# Try the canonical path first for speed.
+
+# Try canonical first
 $preferred = "https://raw.githubusercontent.com/$OwnerRepo/main/pyautoclicker.py"
-if (Test-200 $preferred) { $ScriptUrl = $preferred }
+if (Test-Exists $preferred) { $ScriptUrl = $preferred }
 else {
   foreach ($b in $branches) {
     foreach ($p in $paths) {
       $u = "https://raw.githubusercontent.com/$OwnerRepo/$b/$p"
-      if (Test-200 $u) { $ScriptUrl = $u; break }
+      if (Test-Exists $u) { $ScriptUrl = $u; break }
     }
     if ($ScriptUrl) { break }
   }
 }
-if (-not $ScriptUrl) { Write-Error "Could not find app file in $OwnerRepo. Checked: $($branches -join ', ') / $($paths -join ', ')"; exit 1 }
+
+if (-not $ScriptUrl) {
+  Write-Error "Could not find app file in $OwnerRepo. Checked: $($branches -join ', ') / $($paths -join ', ')"
+  exit 1
+}
+
 
 # Icons (optional)
 $IconIcoUrl = ($ScriptUrl -replace '/[^/]+$','/assets/pyautoclicker.ico')

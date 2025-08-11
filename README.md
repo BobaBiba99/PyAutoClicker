@@ -1,6 +1,6 @@
 # PyAutoClicker
 
-![Preview](assets/pyautoclicker_preview.gif)
+![Preview](docs/banner.png)
 
 **Version:** v1.3 · **OS:** Windows · **License:** GPL-3.0
 
@@ -21,6 +21,9 @@ A safe, open Python auto-clicker with a draggable floating status bubble, intuit
 - 🎛️ **Settings:** General, Hotkeys, Preview (dot size/duration/numbers/interval), Sequences, Help
 
 > **Dependencies:** `pynput`, `pystray`, `Pillow`
+
+ 
+![Preview](docs/pyautoclicker_preview.gif)
 
 ---
 

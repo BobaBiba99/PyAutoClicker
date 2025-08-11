@@ -48,7 +48,7 @@ function New-Shortcut($Path, $Target, $ArgLine, $WorkingDir, $Icon) {
   $shell = New-Object -ComObject WScript.Shell
   $lnk = $shell.CreateShortcut($Path)
   $lnk.TargetPath = $Target
-  $lnk.Arguments  = $ArgLine
+  $lnk.Arguments  = [string]$ArgLine
   $lnk.WorkingDirectory = $WorkingDir
   if (Test-Path $Icon) { $lnk.IconLocation = $Icon }
   $lnk.Save()
@@ -63,7 +63,6 @@ $ShortcutArgs = '"' + (Join-Path $InstallDir "pyautoclicker.py") + '"'
 New-Shortcut (Join-Path $StartMenu "PyAutoClicker.lnk") $Pyw $ShortcutArgs $InstallDir $IconPath
 $Desktop = [Environment]::GetFolderPath('Desktop')
 New-Shortcut (Join-Path $Desktop "PyAutoClicker.lnk")   $Pyw $ShortcutArgs $InstallDir $IconPath
-
 
 
 # --- Install locations ---

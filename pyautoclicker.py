@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-PyAutoClicker — v1.2
+PyAutoClicker — v1.3
 - Floating **status bubble** is draggable anywhere and shows the **loaded profile name**.
 - **Recorder**: press **Start Recording**, then **hold CTRL** and click to capture points; release CTRL to finish.
 - **Save** always creates a new file (no overwrite). Metadata: Name/Site/Slot/Date/Notes + Inter-delay + Repeats.
-- **Sequences Manager** in Settings: browse, load, delete, open folder.
+- **Sequences Manager** in Settings: browse, load, delete, open folder; now with **Search** and per-row **Dry Run**.
 - **Hotkeys** accept single keys (X, P, 1), named keys (<space>, <enter>, arrows, etc.), combos (Ctrl+Alt+S), and F-keys.
-- **Dry Run (Preview)**: press F7 to show coloured dots where clicks WOULD happen (no real clicks).
-- System tray with Start/Pause/Dry Run/Recorder/Settings; optional bubble overlay.
+- **Dry Run (Preview)**: press F7 (default) or use Tray / Sequences tab to show coloured dots where clicks WOULD happen.
+- System tray with Start/Pause/**Dry Run**/Recorder/Settings; optional bubble overlay.
 
 Dependencies: pynput, pystray, Pillow
 """
@@ -112,7 +112,7 @@ else:
     winsound = None
 
 APP_NAME = "PyAutoClicker"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 CONFIG_DIR_NAME = "config"
 SEQUENCES_DIR_NAME = "sequences"
 ASSETS_DIR_NAME = "assets"
@@ -317,6 +317,7 @@ class App:
         self.s = Settings()
         self.running = False
         self.paused = False
+        self.dryrun_active = False
         self.listener = None
         self.mouse = mouse.Controller()
         self.stop_event = threading.Event()
@@ -334,6 +335,7 @@ class App:
         self.win_rec = None
         self.win_bubble = None
         self.tree = None
+        self.seq_search_var = None
 
         self.load_settings()
         self.setup_root()
@@ -410,10 +412,11 @@ class App:
     # ----- tray -----
     def make_tray(self):
         img = Image.open(ICON_PNG_PATH) if os.path.exists(ICON_PNG_PATH) else Image.new("RGBA",(64,64),(90,140,255,255))
-        def startstop_text(_): return f"{'Stop' if self.running else 'Start'} ({humanize_hotkey(self.s.hk_start_stop)})"
+        def startstop_text(_): return "Stop" if self.running else "Start"
+        def pause_text(_): return "Resume" if self.paused else "Pause"
         menu = pystray.Menu(
             pystray.MenuItem(startstop_text, lambda: self.root.after(0, self.toggle_start_stop)),
-            pystray.MenuItem(lambda _: f"{'Resume' if self.paused else 'Pause'} ({humanize_hotkey(self.s.hk_pause)})", lambda: self.root.after(0, self.toggle_pause)),
+            pystray.MenuItem(pause_text,      lambda: self.root.after(0, self.toggle_pause)),
             pystray.MenuItem("Dry Run (preview)", lambda: self.root.after(0, self._hotkey_dry_run)),
             pystray.MenuItem("Recorder…", lambda: self.root.after(0, self.show_recorder_window)),
             pystray.MenuItem("Settings…", lambda: self.root.after(0, self.show_settings_window)),
@@ -423,7 +426,7 @@ class App:
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
     def tray_title(self):
-        mode = "PAUSED" if self.paused else ("RUNNING" if self.running else "Idle")
+        mode = "PAUSED" if self.paused else ("RUNNING" if self.running else ("Dry Run" if self.dryrun_active else "Idle"))
         return f"{APP_NAME} {APP_VERSION} — {mode}"
 
     def update_tray(self):
@@ -504,20 +507,48 @@ class App:
             if self.click_thread and self.click_thread.is_alive():
                 self.click_thread.join(timeout=1.5)
             self.running=False; self.paused=False
-            self.update_tray(); self.beep(600,70)
+            self.update_tray(); self.update_bubble_button_color(); self.beep(600,70)
         else:
             self.stop_event.clear(); self.paused=False; self.running=True
             self.click_thread=threading.Thread(target=self.click_worker, daemon=True); self.click_thread.start()
-            self.update_tray(); self.beep(1000,70)
+            self.update_tray(); self.update_bubble_button_color(); self.beep(1000,70)
 
     def toggle_pause(self):
         if not self.running: return
         self.paused = not self.paused
-        self.update_tray(); self.beep(750 if self.paused else 900,70)
+        self.update_tray(); self.update_bubble_button_color(); self.beep(750 if self.paused else 900,70)
 
-    # ----- Dry Run (Preview) -----
-    def _hotkey_dry_run(self):
-        # Build sequence from current state (loaded or in-memory); preview without clicking
+    # ----- Dry Run helpers -----
+    def _estimate_preview_secs(self, n_steps:int, delay_ms:int, stay_ms:int, repeats:int=1) -> float:
+        delay_ms = max(0, int(delay_ms))
+        stay_ms  = max(0, int(stay_ms))
+        repeats  = max(1, int(repeats))
+        return repeats * (n_steps * (delay_ms/1000.0)) + (stay_ms/1000.0) + 0.25
+
+    def _build_preview_style(self) -> _PreviewStyle:
+        return _PreviewStyle(
+            dot_size=max(6, int(getattr(self.s, "dryrun_dot_size", 18))),
+            stay_ms=max(200, int(getattr(self.s, "dryrun_stay_ms", 1100))),
+            show_numbers=bool(int(getattr(self.s, "dryrun_show_numbers", 1))),
+            step_delay_ms=(None if int(getattr(self.s, "dryrun_step_delay_ms", -1)) < 0
+                           else int(getattr(self.s, "dryrun_step_delay_ms", 150)))
+        )
+
+    def _preview_sequence(self, seq_dict: dict, repeats:int=1):
+        # compute estimated duration and set dryrun_active flag for bubble/tray feedback
+        pts, inter = _dry__extract_points(seq_dict)
+        st = self._build_preview_style()
+        delay = st.step_delay_ms if st.step_delay_ms is not None else (inter if inter is not None else 150)
+        secs = self._estimate_preview_secs(len(pts), delay, st.stay_ms, repeats)
+        self.dryrun_active = True
+        self.update_tray(); self.update_bubble_button_color()
+        dry_run_preview(seq_dict, st, repeats=repeats)
+        def _end_flag():
+            self.dryrun_active = False
+            self.update_tray(); self.update_bubble_button_color()
+        threading.Timer(secs, lambda: self.root.after(0, _end_flag)).start()
+
+    def _current_seq_for_preview(self) -> dict:
         try:
             meta_delay = None
             if getattr(self.s, "current_meta", None):
@@ -534,14 +565,15 @@ class App:
                 seq["steps"] = [{"x": int(x), "y": int(y)}]
             except Exception:
                 pass
-        st = _PreviewStyle(
-            dot_size=max(6, int(getattr(self.s, "dryrun_dot_size", 18))),
-            stay_ms=max(200, int(getattr(self.s, "dryrun_stay_ms", 1100))),
-            show_numbers=bool(int(getattr(self.s, "dryrun_show_numbers", 1))),
-            step_delay_ms=(None if int(getattr(self.s, "dryrun_step_delay_ms", -1)) < 0
-                           else int(getattr(self.s, "dryrun_step_delay_ms", 150)))
-        )
-        dry_run_preview(seq, st, repeats=1)
+        return seq
+
+    # ----- Dry Run (Preview) hotkey/menu -----
+    def _hotkey_dry_run(self):
+        seq = self._current_seq_for_preview()
+        if not seq.get("steps"):
+            self.tip("No points to preview.")
+            return
+        self._preview_sequence(seq, repeats=1)
 
     # ----- Recorder (hold CTRL to capture clicks) -----
     def show_recorder_window(self):
@@ -794,7 +826,7 @@ class App:
                 messagebox.showerror("Invalid values", str(e))
         ttk.Button(tabP, text="Save", command=save_prev).grid(row=6,column=0,pady=10)
 
-        # Sequences tab (manager)
+        # Sequences tab (manager with Search + per-row Dry Run)
         tab4 = ttk.Frame(nb, padding=10); nb.add(tab4, text="Sequences")
         self._build_sequence_manager(tab4)
 
@@ -804,19 +836,21 @@ class App:
             f"{APP_NAME} {APP_VERSION}\n\n"
             "Hotkeys:\n"
             " • Single keys like X, P, 1 (bare keys) or named keys: Space, Enter, Esc, Tab, arrows, Home/End, PageUp/Down, Insert, Delete, Backspace.\n"
-            " • Combos like Ctrl+Alt+S, and F-keys like F6.\n"
-            " • Dry Run: press F7 to preview coloured dots where clicks would happen (no real clicks).\n\n"
+            " • Combos like Ctrl+Alt+S, and F-keys like F6/F7/F8/F9.\n"
+            " • Dry Run: press F7 (default) or use Tray/Sequences to preview coloured dots where clicks would happen (no real clicks).\n\n"
             "Recorder:\n"
             " • Click 'Start Recording', then hold CTRL and click to add points. Release CTRL to stop.\n"
             " • When saving, set Inter-click delay (ms) and Repeat count (0 = infinite).\n"
             " • Save never overwrites; it creates a new file automatically.\n\n"
-            "Playback:\n"
+            "Playback & Bubble:\n"
             " • Start/Stop, Pause/Resume via hotkeys or tray/bubble.\n"
+            " • Bubble Start/Stop button colours: Green=Idle, Red=Running, Yellow=Dry Run.\n"
             " • If a sequence is loaded and you set Inter-delay/Repeats in its metadata, those override per-step delays.\n\n"
-            "Bubble:\n"
-            " • Drag anywhere on the bubble to move it; it shows the loaded sequence name.\n"
+            "Sequences:\n"
+            " • Search across Name/Site/Slot/Date/Notes/File.\n"
+            " • Click the 'Dry Run' cell in the last column to preview that sequence.\n"
         )
-        txt = tk.Text(tab5, width=70, height=18, wrap="word")
+        txt = tk.Text(tab5, width=70, height=20, wrap="word")
         txt.insert("1.0", help_txt)
         txt.configure(state="disabled")
         txt.pack(fill="both", expand=True)
@@ -824,32 +858,50 @@ class App:
         w.protocol("WM_DELETE_WINDOW", w.withdraw)
 
     def _build_sequence_manager(self, parent):
-        cols = ("name","site","slot","date","notes","delay","repeats","steps","file")
-        tree = ttk.Treeview(parent, columns=cols, show="headings", height=10)
-        headings = ["Name","Site","Slot","Date","Notes","Delay(ms)","Repeats","Count","File"]
-        widths   = [160,120,120,110,240,90,80,60,180]
+        # Search bar
+        top = ttk.Frame(parent); top.pack(fill="x", pady=(0,6))
+        ttk.Label(top, text="Search:").pack(side="left")
+        self.seq_search_var = tk.StringVar()
+        ent = ttk.Entry(top, textvariable=self.seq_search_var, width=32)
+        ent.pack(side="left", padx=(6,6))
+        ttk.Button(top, text="Clear", command=lambda: (self.seq_search_var.set(""), refresh())).pack(side="left")
+
+        cols = ("name","site","slot","date","notes","delay","repeats","steps","file","preview")
+        tree = ttk.Treeview(parent, columns=cols, show="headings", height=12)
+        headings = ["Name","Site","Slot","Date","Notes","Delay(ms)","Repeats","Count","File","Dry Run"]
+        widths   = [160,120,120,110,240,90,80,60,200,80]
         for c, h, wd in zip(cols, headings, widths):
             tree.heading(c, text=h); tree.column(c, width=wd, anchor="center")
         tree.pack(fill="both", expand=True, pady=(0,8))
 
+        # Data reload with filter
         def refresh():
+            filt = (self.seq_search_var.get() or "").strip().lower()
             tree.delete(*tree.get_children())
             for fn in sorted(os.listdir(SEQUENCES_DIR)):
                 if not fn.lower().endswith(".json"): continue
                 try:
-                    with open(os.path.join(SEQUENCES_DIR, fn), "r", encoding="utf-8") as f:
+                    path = os.path.join(SEQUENCES_DIR, fn)
+                    with open(path, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     meta = data.get("meta", {})
                     steps = data.get("steps", [])
-                    tree.insert("", "end", iid=fn, values=(
+                    row = (
                         meta.get("name",""), meta.get("site",""), meta.get("slot",""),
                         meta.get("date",""), meta.get("notes",""),
-                        meta.get("inter_delay_ms",0), meta.get("repeats",0), len(steps), fn
-                    ))
+                        meta.get("inter_delay_ms",0), meta.get("repeats",0), len(steps), fn, "Dry Run"
+                    )
+                    hay = " ".join(map(str, row[:-1])).lower()
+                    if filt and filt not in hay:
+                        continue
+                    tree.insert("", "end", iid=fn, values=row)
                 except Exception:
                     pass
+
+        self.seq_search_var.trace_add("write", lambda *_: refresh())
         refresh()
 
+        # Buttons
         btns = ttk.Frame(parent); btns.pack(fill="x")
         def load_sel():
             sel = tree.focus()
@@ -876,10 +928,41 @@ class App:
             else:
                 import subprocess, platform as _pf
                 subprocess.Popen(["open" if _pf.system()=="Darwin" else "xdg-open", folder])
+        def dryrun_sel():
+            sel = tree.focus()
+            if not sel: return
+            path = os.path.join(SEQUENCES_DIR, sel)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._preview_sequence(data, repeats=1)
+            except Exception as e:
+                messagebox.showerror("Dry Run failed", str(e))
+
         ttk.Button(btns, text="Load selected", command=load_sel).pack(side="left", padx=4, pady=4)
         ttk.Button(btns, text="Delete selected", command=del_sel).pack(side="left", padx=4, pady=4)
         ttk.Button(btns, text="Refresh", command=refresh).pack(side="left", padx=4, pady=4)
+        ttk.Button(btns, text="Dry Run selected", command=dryrun_sel).pack(side="left", padx=4, pady=4)
         ttk.Button(btns, text="Open folder", command=open_folder).pack(side="right", padx=4, pady=4)
+
+        # Click in last column ("Dry Run") to preview that row
+        def on_tree_click(event):
+            region = tree.identify("region", event.x, event.y)
+            if region != "cell": return
+            col = tree.identify_column(event.x)
+            if col != f"#{len(cols)}":  # last column
+                return
+            item = tree.identify_row(event.y)
+            if not item: return
+            path = os.path.join(SEQUENCES_DIR, item)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._preview_sequence(data, repeats=1)
+            except Exception as e:
+                messagebox.showerror("Dry Run failed", str(e))
+
+        tree.bind("<Button-1>", on_tree_click)
 
     # ----- Settings save helpers -----
     def _save_general(self, v_bi,v_rm,v_jp,v_cps,v_dc,v_dark,v_auto):
@@ -910,15 +993,16 @@ class App:
         w.resizable(False, False)
         w.overrideredirect(True)
 
-        # UI content
         frm = ttk.Frame(w, padding=8); frm.grid(row=0, column=0)
-        # Profile name (loaded sequence)
         self.lbl_profile = ttk.Label(frm, text="Loaded: (none)", font=("Segoe UI", 9))
         self.lbl_profile.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0,2))
-        # Status + button
         self.lbl_status = ttk.Label(frm, text="Idle", font=("Segoe UI", 10, "bold"))
         self.lbl_status.grid(row=1, column=0, padx=(0,8))
-        ttk.Button(frm, text="Start/Stop", command=self.toggle_start_stop).grid(row=1, column=1)
+
+        # Use tk.Button so we can color it
+        self.btn_startstop = tk.Button(frm, text="Start/Stop", command=self.toggle_start_stop)
+        self.btn_startstop.grid(row=1, column=1)
+        self.update_bubble_button_color()
 
         # Drag anywhere on the bubble
         self._drag = {"x":0, "y":0}
@@ -927,8 +1011,7 @@ class App:
         def do_drag(e):
             nx, ny = e.x_root - self._drag["x"], e.y_root - self._drag["y"]
             w.geometry(f"+{int(nx)}+{int(ny)}")
-        # Bind both to the whole window and its children
-        for widget in (w, frm, self.lbl_status, self.lbl_profile):
+        for widget in (w, frm, self.lbl_status, self.lbl_profile, self.btn_startstop):
             widget.bind("<Button-1>", start_drag)
             widget.bind("<B1-Motion>", do_drag)
 
@@ -938,13 +1021,29 @@ class App:
 
         self._bubble_update()
 
+    def update_bubble_button_color(self):
+        if not (self.win_bubble and self.win_bubble.winfo_exists()):
+            return
+        # Priority: running (red) > dry run (yellow) > idle/paused (green)
+        if self.running:
+            bg = "#dc3545"; fg = "white"   # red
+        elif self.dryrun_active:
+            bg = "#ffc107"; fg = "black"   # yellow
+        else:
+            bg = "#28a745"; fg = "white"   # green
+        try:
+            self.btn_startstop.configure(bg=bg, fg=fg, activebackground=bg)
+        except Exception:
+            pass
+
     def _bubble_update(self):
         if self.win_bubble and self.win_bubble.winfo_exists():
-            mode="PAUSED" if self.paused else ("RUNNING" if self.running else "Idle")
+            mode="PAUSED" if self.paused else ("RUNNING" if self.running else ("Dry Run" if self.dryrun_active else "Idle"))
             self.lbl_status.config(text=mode)
             prof = self.s.current_meta.name or "(none)"
             self.lbl_profile.config(text=f"Loaded: {ellipsis(prof)}")
-        self.root.after(300, self._bubble_update)
+            self.update_bubble_button_color()
+        self.root.after(250, self._bubble_update)
 
     # ----- utils -----
     def tip(self, t): print(f"[TIP] {t}")

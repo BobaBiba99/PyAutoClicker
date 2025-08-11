@@ -1,4 +1,4 @@
-# install.ps1 — PyAutoClicker (Windows, simple)
+# install.ps1 — PyAutoClicker (Windows, simple + Python auto-install)
 # One-liner:
 # irm https://raw.githubusercontent.com/GoblinRules/PyAutoClicker/main/install.ps1 | iex
 
@@ -18,24 +18,70 @@ $Py         = Join-Path $VenvDir "Scripts\python.exe"
 New-Item -Force -ItemType Directory $InstallDir | Out-Null
 New-Item -Force -ItemType Directory (Join-Path $InstallDir "assets") | Out-Null
 
-Write-Host "Downloading app…" -ForegroundColor Cyan
-Invoke-WebRequest -UseBasicParsing $ScriptUrl  -OutFile (Join-Path $InstallDir "pyautoclicker.py")
-try { Invoke-WebRequest -UseBasicParsing $IconIcoUrl -OutFile (Join-Path $InstallDir "assets\pyautoclicker.ico") } catch {}
-try { Invoke-WebRequest -UseBasicParsing $IconPngUrl -OutFile (Join-Path $InstallDir "assets\pyautoclicker.png") } catch {}
-
-# ---- Find Python 3 ----
+# ---- Get an existing Python, if present ----
 function Get-PythonCmd {
   foreach ($c in @("py -3","py","python","python3")) {
     try {
-      $v = & $env:ComSpec /c "$c -c ""import sys;print(sys.version_info[:2])"""
+      $v = & $env:ComSpec /c "$c -c ""import sys;print(sys.version_info[:2])""" 2>$null
       if ($LASTEXITCODE -eq 0 -and $v) { return $c }
     } catch {}
   }
   return $null
 }
-$pyCmd = Get-PythonCmd
-if (-not $pyCmd) { Write-Error "Python 3 is required. Install it and rerun."; exit 1 }
 
+# ---- Ensure Python is installed (per-user), otherwise install it ----
+function Ensure-Python {
+  $cmd = Get-PythonCmd
+  if ($cmd) { return $cmd }
+
+  Write-Host "Python not found — installing Python 3 (per-user)..." -ForegroundColor Yellow
+
+  # Prefer python.org installer (pinned version); fall back to winget if needed.
+  $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "win32" }
+  $ver  = "3.12.5"   # update here when you want a newer default
+  $url  = "https://www.python.org/ftp/python/$ver/python-$ver-$arch.exe"
+  $tmp  = Join-Path $env:TEMP ("python-$ver-$arch.exe")
+
+  $downloaded = $false
+  try {
+    Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp
+    $downloaded = (Test-Path $tmp)
+  } catch {
+    $downloaded = $false
+  }
+
+  if ($downloaded) {
+    # Silent per-user install, add to PATH, include pip & launcher
+    $args = "/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1 Include_launcher=1 SimpleInstall=1"
+    Start-Process -FilePath $tmp -ArgumentList $args -Wait
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+  } else {
+    Write-Host "Direct download failed; trying winget..." -ForegroundColor Yellow
+    try {
+      winget install -e --id Python.Python.3.12 --source winget --silent --accept-package-agreements --accept-source-agreements
+    } catch {
+      Write-Error "Couldn’t install Python automatically. Install it from https://www.python.org/downloads/ and re-run." ; exit 1
+    }
+  }
+
+  # Re-detect
+  $cmd = Get-PythonCmd
+  if (-not $cmd) {
+    Write-Error "Python installation appears to have failed. Please install manually, then re-run." ; exit 1
+  }
+  return $cmd
+}
+
+# ---- Download app + icons ----
+Write-Host "Downloading app…" -ForegroundColor Cyan
+Invoke-WebRequest -UseBasicParsing $ScriptUrl  -OutFile (Join-Path $InstallDir "pyautoclicker.py")
+try { Invoke-WebRequest -UseBasicParsing $IconIcoUrl -OutFile (Join-Path $InstallDir "assets\pyautoclicker.ico") } catch {}
+try { Invoke-WebRequest -UseBasicParsing $IconPngUrl -OutFile (Join-Path $InstallDir "assets\pyautoclicker.png") } catch {}
+
+# ---- Make sure Python exists (install if missing) ----
+$pyCmd = Ensure-Python
+
+# ---- Create venv + deps ----
 Write-Host "Creating virtual environment…" -ForegroundColor Cyan
 & $env:ComSpec /c "$pyCmd -m venv `"$VenvDir`""
 

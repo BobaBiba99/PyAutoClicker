@@ -145,7 +145,7 @@ function Ensure-Python {
     Write-Error "Python installation appears to have failed. Please install manually, then re-run." ; exit 1
   }
   return $cmd
-}
+ }
 
 # ---- Download app + icons ----
 Write-Host "Downloading app…" -ForegroundColor Cyan

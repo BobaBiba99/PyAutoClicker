@@ -17,7 +17,7 @@ Requires **Python 3** on Windows.
 
 One-liner (change `<you>` to your GitHub username):
 ```powershell
-irm https://raw.githubusercontent.com/<you>/PyAutoClicker/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/GoblinRules/PyAutoClicker/main/install.ps1 | iex
 ```
 
 This will:

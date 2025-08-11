@@ -1,155 +1,130 @@
 # PyAutoClicker
 
-![Banner](docs/banner.png)
+![Preview](assets/pyautoclicker_preview.gif)
 
-A lightweight, privacy‑friendly auto clicker for Windows with a built‑in **recorder**, **sequence manager**, and a draggable **status bubble**. Configure hotkeys, jitter, delays, and repeat counts — then launch in one tap.
+**Version:** v1.3 · **OS:** Windows · **License:** GPL-3.0
 
-> **License:** GPL‑3.0 — see [LICENSE](LICENSE)
-
----
-
-## ✨ Features
-
-- **CTRL‑hold recorder:** press **Start Recording**, then **hold CTRL** and click to capture points. Release **CTRL** to stop.
-- **Sequence metadata:** name, site, slot, date, notes. Set **inter‑click delay (ms)** and **repeats** (0 = infinite).
-- **Sequence manager:** browse, load, delete saved JSON sequences.
-- **Unique saves:** never overwrites — new files are auto‑numbered.
-- **Customizable hotkeys:** single keys (`x`, `p`, `1`) or combos (`Ctrl+X`, function keys).
-- **Floating bubble:** draggable, always-on-top panel showing **Loaded: …** and current state (Idle/Running/Paused).
-- **Human-like options:** random time jitter (±ms), pixel jitter (±px), max CPS safety, optional double-clicks.
-- **Tray menu:** quick Start/Stop, Pause/Resume, open Recorder/Settings, Exit.
-- **Portable install:** per-user virtual environment inside `%LOCALAPPDATA%\PyAutoClicker`.
-
-![Install](docs/install.png)
+A safe, open Python auto-clicker with a draggable floating status bubble, intuitive recorder (hold **CTRL** & click), a searchable **Sequences Manager**, and a **Dry Run (Preview)** mode that shows *coloured dots* where clicks **would** happen — no clicks are sent.
 
 ---
 
-## 🚀 Install (PowerShell)
+## ✨ Highlights
 
-> If Python isn’t installed, the installer will fetch and install it for you (per‑user).
+- 🫧 **Floating bubble** shows status and loaded profile; drag it anywhere  
+  - Button colours: **Green** = Idle, **Red** = Running, **Yellow** = Dry Run
+- ⏺️ **Recorder:** *Start Recording* → hold **CTRL** & click to add points → release CTRL to finish
+- 💾 **Save** always creates a new file (Name/Site/Slot/Date/Notes + Inter-delay + Repeats)
+- 📂 **Sequences Manager:** browse, **search**, load, delete, open folder; per-row **Dry Run**
+- 👁️ **Dry Run (Preview):** press **F7** or use Tray/Sequences to visualise clicks with coloured dots
+- 🖱️ **Hotkeys:** single keys (X, P, 1), named keys (`<space>`, `<enter>`, arrows), combos (`Ctrl+Alt+S`), F-keys
+- 🧰 **System tray:** Start / Pause / **Dry Run** / Recorder / Settings / Exit
+- 🎛️ **Settings:** General, Hotkeys, Preview (dot size/duration/numbers/interval), Sequences, Help
 
+> **Dependencies:** `pynput`, `pystray`, `Pillow`
+
+---
+
+## 🚀 Install (PowerShell, Windows)
+
+> One-liner (admin not required):
 ```powershell
 irm https://raw.githubusercontent.com/GoblinRules/PyAutoClicker/main/install.ps1 | iex
 ```
 
-This downloads `pyautoclicker.py`, creates a virtual environment, installs dependencies (`pynput`, `pystray`, `Pillow`), and adds **Start Menu** + **Desktop** shortcuts.
+The installer:
+- downloads the latest `pyautoclicker.py` + icons,
+- ensures **Python 3** is installed (auto-installs if missing),
+- creates a local **venv**, installs deps,
+- adds **Start Menu** + **Desktop** shortcuts (with icon).
 
-- Installed to: `%LOCALAPPDATA%\PyAutoClicker`
-- Run manually (no console):
-  ```powershell
-  Start-Process "$env:LOCALAPPDATA\PyAutoClicker\.venv\Scripts\pythonw.exe" -ArgumentList "`"$env:LOCALAPPDATA\PyAutoClicker\pyautoclicker.py`""
-  ```
+### Update / Uninstall
+- **Update:** run `update.ps1` (pulls latest from GitHub + updates deps)  
+- **Uninstall:** run `uninstall.ps1` (removes app files + shortcuts)
 
 ---
 
 ## 🧭 Quick Start
 
-1. Open **Settings → General**, tweak **Base interval (ms)** (used only when no sequence is loaded).
-2. Click **Open Recorder** (or tray → Recorder).
-3. Hit **Start Recording**, then **hold CTRL** and click every spot you want.
-4. **Release CTRL** to stop.
-5. Click **Save Sequence…**, set **inter‑click delay (ms)**, **repeats** (0 = infinite), and add metadata.
-6. Start/Stop with your hotkey (default **F6**).
-
-![Recorder Flow](docs/recorder_flow.png)
+1. Launch **PyAutoClicker** from Start Menu or the Desktop shortcut.  
+2. Open **Recorder…** → click **Start Recording**.  
+3. **Hold CTRL** and click anywhere you want to add a step. **Release CTRL** to finish.  
+4. Click **Save Sequence…**, fill out metadata, set **Inter-click delay (ms)** and **Repeats** (0 = infinite), and save.  
+5. Press **F6** to start/stop playback; **F9** to pause/resume.
 
 ---
 
-## 🎛️ Settings Overview
+## 🔍 Sequences Manager (Search + per-row Dry Run)
 
-- **Base interval (ms):** used when **no sequence** is loaded; clicks at the current cursor.
-- **Random time jitter (±ms):** adds/subtracts up to N ms for human‑like timing.
-- **Pixel jitter (±px):** random pixel drift around the target coordinate.
-- **Max CPS:** safety cap on clicks per second.
-- **Double-click:** perform 2 clicks per step.
-- **Dark mode / Sounds / Auto‑open ‘Save Sequence’** after recording.
-- **Hotkeys:** customize Start/Stop, Pause/Resume, Add point (manual), Finish recording.
-
-![Hotkeys](docs/hotkeys.png)
+- Open **Settings → Sequences**  
+- Use the **Search** box to filter across **Name/Site/Slot/Date/Notes/File**  
+- Click **Dry Run** in the last column (or use the **Dry Run selected** button) to preview that sequence  
+- Buttons: **Load selected**, **Delete selected**, **Refresh**, **Open folder**
 
 ---
 
-## 🧰 Floating Status Bubble
+## 👁️ Dry Run (Preview)
 
-The small always‑on‑top panel that shows:
-- **Loaded:** name of the selected sequence (or `(none)`)
-- **Status:** Idle / Running / Paused
-- A **Start/Stop** button
+- Hotkey **F7** by default (configurable under **Settings → Hotkeys**)  
+- Shows small coloured dots (with step numbers) where clicks **would** occur — **no clicks are sent**  
+- Dot style is configurable under **Settings → Preview**:  
+  - **Dot size (px)**, **Dot stay (ms)**, **Show numbers**, **Step delay override (ms)**  
+  - Use **-1** to honour the sequence’s own **Inter-click delay**
 
-Tip: **drag anywhere** on the bubble to move it.
-
-![Bubble](docs/bubble.png)
+> Dry Run is also available from the **Tray menu** and from **Sequences** (per-row **Dry Run**).
 
 ---
 
-## 💾 Sequences
+## 🫧 Bubble overlay (status)
 
-Saved sequences are JSON files in `sequences/`. Each save **never overwrites** — a unique filename is chosen automatically.
-
-Use **Settings → Sequences** to scroll through saved sequences, load one, delete one, or open the folder.
-
-**JSON shape** (for reference):
-```json
-{
-  "meta": {
-    "name": "My Picks",
-    "site": "example",
-    "slot": "A1",
-    "date": "2025-08-11",
-    "notes": "Half screen layout",
-    "inter_delay_ms": 120,
-    "repeats": 0
-  },
-  "steps": [
-    { "x": 640, "y": 360, "delay_ms": 0, "button": "left" }
-  ]
-}
-```
+- **Green** = Idle  
+- **Red** = Running  
+- **Yellow** = Dry Run  
+- Displays **Loaded: <sequence name>**, and updates continuously  
+- Drag anywhere on the bubble to move it
 
 ---
 
 ## ⌨️ Default Hotkeys
 
-- Start/Stop: **F6**
-- Pause/Resume: **F9**
-- Finish recording (manual): **Ctrl+F8**
-- Add point (manual): **F8**
+| Action | Default |
+|---|---|
+| Start / Stop | `F6` |
+| Pause / Resume | `F9` |
+| Add point (manual) | `F8` |
+| Finish recording (manual) | `Ctrl+F8` |
+| **Dry Run (preview)** | `F7` |
 
-You can change any of these to a **single key** (e.g., `X`) or a **combo** (`Ctrl+X`). Named keys like `<space>`, `<enter>`, arrows, etc., are supported.
-
----
-
-## 🔄 Update / ❌ Uninstall
-
-- **Update to latest:**
-  ```powershell
-  irm https://raw.githubusercontent.com/GoblinRules/PyAutoClicker/main/update.ps1 | iex
-  ```
-- **Uninstall (remove app + shortcuts):**
-  ```powershell
-  irm https://raw.githubusercontent.com/GoblinRules/PyAutoClicker/main/uninstall.ps1 | iex
-  ```
-  Add `-KeepData` to keep your sequences and config.
+> Hotkeys accept **single keys** (e.g. `x`, `p`, `1`), **named keys** (`<space>`, `<enter>`, arrows), **combos** (`Ctrl+Alt+S`) and **F-keys**.
 
 ---
 
-## 🧯 Troubleshooting
+## ⚙️ Settings
 
-- **No module named ‘pynput’** — launch via the shortcut (uses the app’s venv), or run:
-  ```powershell
-  "$env:LOCALAPPDATA\PyAutoClicker\.venv\Scripts\python.exe" -m pip install --upgrade pip pynput pystray Pillow
-  ```
-- **Hotkey parse error** — use a bare character for single keys (`x`, not `<x>`). Function keys use `<f6>`, named keys `<space>`, `<enter>`.
-- **Installer can’t find Python** — it will attempt auto‑install (python.org or winget). If both are blocked, install Python 3 manually and re-run.
+- **General**: Base interval (used if no sequence), random jitter (ms), pixel jitter (px), max CPS cap, double-click, dark mode, auto-open Save dialog after recording
+- **Hotkeys**: Change any key combo
+- **Preview**: Dry Run dot appearance + optional per-step delay override
+- **Sequences**: Manager with search + per-row Dry Run
+- **Help**: Cheatsheet and tips
 
 ---
 
-## 🛡️ Privacy
+## 🐞 Troubleshooting
 
-PyAutoClicker runs locally and never sends your data anywhere. Sequences are stored on your machine as plain JSON.
+- **No clicks but status is Running** → if you didn’t load/record a sequence, the clicker will click at the **current cursor** using **Base interval**  
+- **Hotkey won’t bind** → ensure it’s valid; try `F-keys`, or combos like `Ctrl+Shift+S`  
+- **Antivirus flags a script** → this is a plain Python app; review the source (`pyautoclicker.py`) and install from the official repo
+
+---
+
+## 🧪 Building a portable EXE (optional)
+
+You can package with `pyinstaller` (outside scope of the default installer):
+```bash
+pyinstaller --noconfirm --onefile --windowed --icon assets/pyautoclicker.ico pyautoclicker.py
+```
 
 ---
 
 ## 📄 License
 
-PyAutoClicker is released under the **GNU GPL‑3.0**. You may copy, modify, and distribute under the terms of the GPL‑3.0. See [LICENSE](LICENSE).
+This project is licensed under the **GNU General Public License v3.0** (GPL-3.0). See [`LICENSE`](../LICENSE) for details.

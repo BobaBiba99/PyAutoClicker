@@ -59,4 +59,4 @@ Pillow
 - If you want a custom icon, place a `assets/clicker.png` in the repo; the app falls back to a simple placeholder otherwise.
 
 ## 🔖 License
-MIT
+GPL-3.0 license

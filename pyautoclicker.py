@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-PyAutoClicker — v1.1
+PyAutoClicker — v1.2
 - Floating **status bubble** is draggable anywhere and shows the **loaded profile name**.
 - **Recorder**: press **Start Recording**, then **hold CTRL** and click to capture points; release CTRL to finish.
 - **Save** always creates a new file (no overwrite). Metadata: Name/Site/Slot/Date/Notes + Inter-delay + Repeats.
 - **Sequences Manager** in Settings: browse, load, delete, open folder.
 - **Hotkeys** accept single keys (X, P, 1), named keys (<space>, <enter>, arrows, etc.), combos (Ctrl+Alt+S), and F-keys.
-- System tray with Start/Pause/Recorder/Settings; optional bubble overlay.
+- **Dry Run (Preview)**: press F7 to show coloured dots where clicks WOULD happen (no real clicks).
+- System tray with Start/Pause/Dry Run/Recorder/Settings; optional bubble overlay.
 
 Dependencies: pynput, pystray, Pillow
 """
@@ -22,6 +23,85 @@ from pynput.keyboard import Key
 import pystray
 from PIL import Image
 
+# --- Dry-Run Preview (Windows/Tk overlay) ------------------------------------
+# Shows coloured dots where clicks WOULD happen (no real clicks are sent).
+# Uses tiny transparent Toplevels so it works across multiple monitors.
+
+import tkinter as _tk
+import threading as _thr
+import time as _time
+from dataclasses import dataclass as _dataclass
+from typing import Any as _Any, Optional as _Optional, Tuple as _Tuple, List as _List
+
+@_dataclass
+class _PreviewStyle:
+    dot_size: int = 18                 # diameter in px
+    stay_ms: int = 1100                # how long a dot stays visible
+    step_delay_ms: _Optional[int] = None  # None -> use sequence meta or 150ms
+    show_numbers: bool = True
+    palette: _Tuple[str, ...] = ("#ff3b30", "#34c759", "#007aff", "#ffcc00", "#af52de", "#5ac8fa")
+
+def _dry__extract_points(sequence: _Any):
+    """Accepts your sequence dict or a list of step dicts; returns (points, inter_delay_ms)."""
+    inter = None
+    pts: _List[_Tuple[int,int]] = []
+    if isinstance(sequence, dict):
+        steps = sequence.get("steps", [])
+        inter = (sequence.get("meta") or {}).get("inter_delay_ms")
+    else:
+        steps = sequence
+    for s in steps:
+        if isinstance(s, dict):
+            x, y = int(s.get("x")), int(s.get("y"))
+        else:
+            x, y = int(s[0]), int(s[1])
+        pts.append((x, y))
+    return pts, inter
+
+def _dry__ensure_root() -> _tk.Tk:
+    r = _tk._default_root
+    if r is None:
+        r = _tk.Tk()
+        r.withdraw()
+    return r
+
+def _dry__make_dot(x: int, y: int, color: str, label: _Optional[str], style: _PreviewStyle):
+    top = _tk.Toplevel()
+    top.overrideredirect(True)
+    try:
+        top.attributes("-topmost", True)
+        top.wm_attributes("-transparentcolor", "magenta")
+    except Exception:
+        pass
+    r = style.dot_size // 2
+    geom = f"{style.dot_size}x{style.dot_size}+{max(x - r, 0)}+{max(y - r, 0)}"
+    top.geometry(geom)
+    c = _tk.Canvas(top, width=style.dot_size, height=style.dot_size, bg="magenta", highlightthickness=0, bd=0)
+    c.pack()
+    c.create_oval(1, 1, style.dot_size-1, style.dot_size-1, fill=color, outline=color)
+    if label:
+        c.create_text(style.dot_size//2, style.dot_size//2, text=label, fill="white", font=("Segoe UI", 8, "bold"))
+    top.after(style.stay_ms, top.destroy)
+
+def dry_run_preview(sequence: _Any, style: _Optional[_PreviewStyle] = None, repeats: int = 1):
+    """Public API: call to preview the current sequence (non-blocking)."""
+    pts, inter = _dry__extract_points(sequence)
+    if not pts:
+        return
+    st = style or _PreviewStyle()
+    delay = st.step_delay_ms if st.step_delay_ms is not None else (inter if inter is not None else 150)
+
+    def worker():
+        _dry__ensure_root()
+        for _ in range(max(1, repeats)):
+            for i, (x, y) in enumerate(pts, start=1):
+                color = st.palette[(i-1) % len(st.palette)]
+                label = str(i) if st.show_numbers else None
+                _dry__make_dot(x, y, color, label, st)
+                _time.sleep(max(0, delay) / 1000.0)
+    _thr.Thread(target=worker, daemon=True).start()
+# ----------------------------------------------------------------------------- 
+
 IS_WINDOWS = platform.system() == "Windows"
 if IS_WINDOWS:
     try:
@@ -32,7 +112,7 @@ else:
     winsound = None
 
 APP_NAME = "PyAutoClicker"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 CONFIG_DIR_NAME = "config"
 SEQUENCES_DIR_NAME = "sequences"
 ASSETS_DIR_NAME = "assets"
@@ -162,6 +242,13 @@ class Settings:
     hk_pause: str = "<f9>"
     hk_add: str = "<f8>"
     hk_finish: str = "<ctrl>+<f8>"
+    hk_dryrun: str = "<f7>"
+
+    # Dry run settings
+    dryrun_dot_size: int = 18
+    dryrun_stay_ms: int = 1100
+    dryrun_show_numbers: int = 1
+    dryrun_step_delay_ms: int = -1  # -1 = use sequence meta or 150ms
 
     # UI
     start_minimized: int = 0
@@ -183,15 +270,22 @@ class Settings:
         self.double_click = 1 if int(self.double_click) else 0
         # normalize hotkeys (falls back to defaults if invalid)
         self.hk_start_stop = normalize_hotkey(self.hk_start_stop) or "<f6>"
-        self.hk_pause = normalize_hotkey(self.hk_pause) or "<f9>"
-        self.hk_add = normalize_hotkey(self.hk_add) or "<f8>"
-        self.hk_finish = normalize_hotkey(self.hk_finish) or "<ctrl>+<f8>"
+        self.hk_pause      = normalize_hotkey(self.hk_pause) or "<f9>"
+        self.hk_add        = normalize_hotkey(self.hk_add) or "<f8>"
+        self.hk_finish     = normalize_hotkey(self.hk_finish) or "<ctrl>+<f8>"
+        self.hk_dryrun     = normalize_hotkey(getattr(self, "hk_dryrun", "<f7>")) or "<f7>"
+        # normalize toggles / ints
         self.start_minimized = 1 if int(self.start_minimized) else 0
-        self.dark_mode = 1 if int(self.dark_mode) else 0
-        self.sounds = 1 if int(self.sounds) else 0
+        self.dark_mode       = 1 if int(self.dark_mode) else 0
+        self.sounds          = 1 if int(self.sounds) else 0
         self.hotkeys_enabled = 1 if int(self.hotkeys_enabled) else 0
-        self.show_bubble = 1 if int(self.show_bubble) else 0
+        self.show_bubble     = 1 if int(self.show_bubble) else 0
         self.auto_save_after_record = 1 if int(self.auto_save_after_record) else 0
+        self.dryrun_show_numbers    = 1 if int(self.dryrun_show_numbers) else 0
+        try:
+            self.dryrun_step_delay_ms = int(self.dryrun_step_delay_ms)
+        except Exception:
+            self.dryrun_step_delay_ms = -1
 
 # ---------- utils ----------
 def slugify(name: str) -> str:
@@ -320,6 +414,7 @@ class App:
         menu = pystray.Menu(
             pystray.MenuItem(startstop_text, lambda: self.root.after(0, self.toggle_start_stop)),
             pystray.MenuItem(lambda _: f"{'Resume' if self.paused else 'Pause'} ({humanize_hotkey(self.s.hk_pause)})", lambda: self.root.after(0, self.toggle_pause)),
+            pystray.MenuItem("Dry Run (preview)", lambda: self.root.after(0, self._hotkey_dry_run)),
             pystray.MenuItem("Recorder…", lambda: self.root.after(0, self.show_recorder_window)),
             pystray.MenuItem("Settings…", lambda: self.root.after(0, self.show_settings_window)),
             pystray.MenuItem("Exit", lambda: self.root.after(0, self.exit_app))
@@ -343,10 +438,11 @@ class App:
         if not self.s.hotkeys_enabled: return
         combos = {
             self.s.hk_start_stop: lambda: self.root.after(0, self.toggle_start_stop),
-            self.s.hk_pause: lambda: self.root.after(0, self.toggle_pause),
-            self.s.hk_add: lambda: self.root.after(0, self.add_point_manual),
-            self.s.hk_finish: lambda: self.root.after(0, self.finish_recording_manual),
-            "<ctrl>+<esc>": lambda: self.root.after(0, self.exit_app),
+            self.s.hk_pause:      lambda: self.root.after(0, self.toggle_pause),
+            self.s.hk_add:        lambda: self.root.after(0, self.add_point_manual),
+            self.s.hk_finish:     lambda: self.root.after(0, self.finish_recording_manual),
+            self.s.hk_dryrun:     lambda: self.root.after(0, self._hotkey_dry_run),
+            "<ctrl>+<esc>":       lambda: self.root.after(0, self.exit_app),
         }
         self.listener = keyboard.GlobalHotKeys(combos); self.listener.start()
 
@@ -418,6 +514,34 @@ class App:
         if not self.running: return
         self.paused = not self.paused
         self.update_tray(); self.beep(750 if self.paused else 900,70)
+
+    # ----- Dry Run (Preview) -----
+    def _hotkey_dry_run(self):
+        # Build sequence from current state (loaded or in-memory); preview without clicking
+        try:
+            meta_delay = None
+            if getattr(self.s, "current_meta", None):
+                meta_delay = int(getattr(self.s.current_meta, "inter_delay_ms", 0)) or None
+        except Exception:
+            meta_delay = None
+        seq = {
+            "meta": {"inter_delay_ms": meta_delay if meta_delay is not None else 150},
+            "steps": [{"x": int(st.x), "y": int(st.y)} for st in (self.s.current_seq or [])]
+        }
+        if not seq["steps"]:
+            try:
+                x, y = self.mouse.position
+                seq["steps"] = [{"x": int(x), "y": int(y)}]
+            except Exception:
+                pass
+        st = _PreviewStyle(
+            dot_size=max(6, int(getattr(self.s, "dryrun_dot_size", 18))),
+            stay_ms=max(200, int(getattr(self.s, "dryrun_stay_ms", 1100))),
+            show_numbers=bool(int(getattr(self.s, "dryrun_show_numbers", 1))),
+            step_delay_ms=(None if int(getattr(self.s, "dryrun_step_delay_ms", -1)) < 0
+                           else int(getattr(self.s, "dryrun_step_delay_ms", 150)))
+        )
+        dry_run_preview(seq, st, repeats=1)
 
     # ----- Recorder (hold CTRL to capture clicks) -----
     def show_recorder_window(self):
@@ -604,7 +728,7 @@ class App:
         d.wait_window()
         return out
 
-    # ----- Settings window with tabs (Sequences Manager + Help) -----
+    # ----- Settings window with tabs (General/Hotkeys/Preview/Sequences/Help) -----
     def show_settings_window(self):
         if self.win_settings and self.win_settings.winfo_exists():
             self.win_settings.deiconify(); self.win_settings.lift(); return
@@ -642,7 +766,33 @@ class App:
         hk_pause=hkrow("Pause/Resume:", self.s.hk_pause)
         hk_add=hkrow("Add point (manual):", self.s.hk_add)
         hk_finish=hkrow("Finish recording (manual):", self.s.hk_finish)
-        ttk.Button(tab2, text="Save", command=lambda:self._save_hotkeys(hk_start,hk_pause,hk_add,hk_finish)).grid(row=row,column=0,pady=8)
+        row += 1
+        hk_dry=hkrow("Dry Run (preview):", self.s.hk_dryrun)
+        ttk.Button(tab2, text="Save", command=lambda:self._save_hotkeys(hk_start,hk_pause,hk_add,hk_finish,hk_dry)).grid(row=row,column=0,pady=8)
+
+        # Preview tab (for dot style)
+        tabP = ttk.Frame(nb, padding=10); nb.add(tabP, text="Preview")
+        ttk.Label(tabP, text="Dry Run (Preview) settings").grid(row=0,column=0,columnspan=2,sticky="w",pady=(0,6))
+        v_psize = tk.StringVar(value=str(getattr(self.s, "dryrun_dot_size", 18)))
+        v_pstay = tk.StringVar(value=str(getattr(self.s, "dryrun_stay_ms", 1100)))
+        v_pnum  = tk.IntVar(value=int(getattr(self.s, "dryrun_show_numbers", 1)))
+        v_pstep = tk.StringVar(value=str(getattr(self.s, "dryrun_step_delay_ms", -1)))
+        ttk.Label(tabP, text="Dot size (px):").grid(row=1,column=0,sticky="w"); ttk.Entry(tabP,textvariable=v_psize,width=8).grid(row=1,column=1,sticky="w")
+        ttk.Label(tabP, text="Dot stay (ms):").grid(row=2,column=0,sticky="w"); ttk.Entry(tabP,textvariable=v_pstay,width=8).grid(row=2,column=1,sticky="w")
+        ttk.Checkbutton(tabP, text="Show step numbers", variable=v_pnum).grid(row=3,column=0,columnspan=2,sticky="w")
+        ttk.Label(tabP, text="Step delay override (ms):").grid(row=4,column=0,sticky="w")
+        ttk.Entry(tabP,textvariable=v_pstep,width=8).grid(row=4,column=1,sticky="w")
+        ttk.Label(tabP, text="Use -1 to use the sequence's inter-delay; otherwise this value is used.").grid(row=5,column=0,columnspan=2,sticky="w")
+        def save_prev():
+            try:
+                self.s.dryrun_dot_size=max(6,int(v_psize.get() or 18))
+                self.s.dryrun_stay_ms=max(200,int(v_pstay.get() or 1100))
+                self.s.dryrun_show_numbers=1 if int(v_pnum.get()) else 0
+                self.s.dryrun_step_delay_ms=int(v_pstep.get() or -1)
+                self.s.clamp(); self.save_settings(); self.tip("Preview settings saved.")
+            except Exception as e:
+                messagebox.showerror("Invalid values", str(e))
+        ttk.Button(tabP, text="Save", command=save_prev).grid(row=6,column=0,pady=10)
 
         # Sequences tab (manager)
         tab4 = ttk.Frame(nb, padding=10); nb.add(tab4, text="Sequences")
@@ -654,7 +804,8 @@ class App:
             f"{APP_NAME} {APP_VERSION}\n\n"
             "Hotkeys:\n"
             " • Single keys like X, P, 1 (bare keys) or named keys: Space, Enter, Esc, Tab, arrows, Home/End, PageUp/Down, Insert, Delete, Backspace.\n"
-            " • Combos like Ctrl+Alt+S, and F-keys like F6.\n\n"
+            " • Combos like Ctrl+Alt+S, and F-keys like F6.\n"
+            " • Dry Run: press F7 to preview coloured dots where clicks would happen (no real clicks).\n\n"
             "Recorder:\n"
             " • Click 'Start Recording', then hold CTRL and click to add points. Release CTRL to stop.\n"
             " • When saving, set Inter-click delay (ms) and Repeat count (0 = infinite).\n"
@@ -741,11 +892,12 @@ class App:
         self.s.auto_save_after_record=int(v_auto.get() or 1)
         self.s.clamp(); self.save_settings(); self.apply_theme(); self.tip("General saved.")
 
-    def _save_hotkeys(self, hk_start,hk_pause,hk_add,hk_finish):
+    def _save_hotkeys(self, hk_start,hk_pause,hk_add,hk_finish,hk_dry):
         self.s.hk_start_stop=normalize_hotkey(hk_start.get())
-        self.s.hk_pause=normalize_hotkey(hk_pause.get())
-        self.s.hk_add=normalize_hotkey(hk_add.get())
-        self.s.hk_finish=normalize_hotkey(hk_finish.get())
+        self.s.hk_pause     =normalize_hotkey(hk_pause.get())
+        self.s.hk_add       =normalize_hotkey(hk_add.get())
+        self.s.hk_finish    =normalize_hotkey(hk_finish.get())
+        self.s.hk_dryrun    =normalize_hotkey(hk_dry.get()) or "<f7>"
         self.s.clamp(); self.save_settings(); self.restart_hotkeys(); self.tip("Hotkeys updated.")
 
     # ----- Bubble -----

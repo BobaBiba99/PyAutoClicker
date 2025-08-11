@@ -123,7 +123,7 @@ The installer:
 
 You can package with `pyinstaller` (outside scope of the default installer):
 ```bash
-pyinstaller --noconfirm --onefile --windowed --icon assets/pyautoclicker.ico pyautoclicker.py
+pyinstaller --noconfirm --onefile --windowed --icon docs/pyautoclicker.ico pyautoclicker.py
 ```
 
 ---

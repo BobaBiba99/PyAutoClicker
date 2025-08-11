@@ -1,5 +1,5 @@
 # install.ps1 — PyAutoClicker (Windows)
-# Usage: irm https://raw.githubusercontent.com/<you>/PyAutoClicker/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/GoblinRules/PyAutoClicker/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 

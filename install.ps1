@@ -32,12 +32,13 @@ function Get-PythonCmd {
 # ---- Probe for python.exe in common install folders ----
 function Find-LocalPython {
   $cands = @(
-    Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"),
     (Join-Path $env:LOCALAPPDATA "Programs\Python\Python311\python.exe"),
-    (Join-Path ${env:ProgramFiles}       "Python312\python.exe"),
-    (Join-Path ${env:ProgramFiles}       "Python311\python.exe"),
-    (Join-Path ${env:ProgramFiles(x86)}  "Python312-32\python.exe"),
-    (Join-Path ${env:ProgramFiles(x86)}  "Python311-32\python.exe")
+    (Join-Path ${env:ProgramFiles}      "Python312\python.exe"),
+    (Join-Path ${env:ProgramFiles}      "Python311\python.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Python312-32\python.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Python311-32\python.exe")
+  )
   foreach ($p in $cands) { if ($p -and (Test-Path $p)) { return "`"$p`"" } }
   return $null
 }

@@ -44,25 +44,26 @@ Write-Host "Installing dependencies…" -ForegroundColor Cyan
 & $Py -m pip install pynput pystray Pillow
 
 # ---- Shortcuts (with icon) ----
-function New-Shortcut($Path,$Target,$Args,$WorkingDir,$Icon) {
+function New-Shortcut($Path, $Target, $ArgLine, $WorkingDir, $Icon) {
   $shell = New-Object -ComObject WScript.Shell
   $lnk = $shell.CreateShortcut($Path)
-  $lnk.TargetPath = $Target; $lnk.Arguments = $Args; $lnk.WorkingDirectory = $WorkingDir
+  $lnk.TargetPath = $Target
+  $lnk.Arguments  = $ArgLine
+  $lnk.WorkingDirectory = $WorkingDir
   if (Test-Path $Icon) { $lnk.IconLocation = $Icon }
   $lnk.Save()
 }
 
 $StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\PyAutoClicker"
 New-Item -Force -ItemType Directory $StartMenu | Out-Null
-$IconPath = Join-Path $InstallDir "assets\pyautoclicker.ico"
-$Args     = "`"`"$InstallDir\pyautoclicker.py`"`""
 
-New-Shortcut (Join-Path $StartMenu "PyAutoClicker.lnk") $Pyw $Args $InstallDir $IconPath
+$IconPath     = Join-Path $InstallDir "assets\pyautoclicker.ico"
+$ShortcutArgs = '"' + (Join-Path $InstallDir "pyautoclicker.py") + '"'
+
+New-Shortcut (Join-Path $StartMenu "PyAutoClicker.lnk") $Pyw $ShortcutArgs $InstallDir $IconPath
 $Desktop = [Environment]::GetFolderPath('Desktop')
-New-Shortcut (Join-Path $Desktop "PyAutoClicker.lnk")   $Pyw $Args $InstallDir $IconPath
+New-Shortcut (Join-Path $Desktop "PyAutoClicker.lnk")   $Pyw $ShortcutArgs $InstallDir $IconPath
 
-Write-Host "Done! Installed to $InstallDir" -ForegroundColor Green
-Write-Host "Launch via Start Menu or the desktop shortcut."
 
 
 # --- Install locations ---

@@ -220,7 +220,7 @@ class App:
         self.rec_mouse_listener = None
         self.rec_kb_listener = None
         self.rec_hold_active = False
-               self.rec_in_progress = False
+        self.rec_in_progress = False
 
         # UI windows
         self.win_settings = None
